@@ -1,4 +1,5 @@
-use rand::seq::IteratorRandom;
+use chrono::{DateTime, Utc, Days};
+use rand::{seq::IteratorRandom, rngs::ThreadRng};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip, ops::{Deref, DerefMut}};
 
 const DEFAULT_COUNT: usize = 1_000;
@@ -53,21 +54,17 @@ pub struct EBS {
 impl EBS {
     pub fn new_from_file(path: String) -> Result<Self, Box<dyn Error>> {
         let mut res = Self::default();
-
         let file = File::open(path)?;
         let buf_reader = BufReader::new(file);
         let mut rdr = csv::Reader::from_reader(buf_reader);
         let mut estimates: Vec<f32> = Vec::new();
         let mut actuals: Vec<f32> = Vec::new();
         for result in rdr.deserialize() {
-            // Notice that we need to provide a type hint for automatic
-            // deserialization.
             let record: Task = result?;
-            println!("{:?}", record);
             if !record.has_enough_data() {
                 continue;
             }
-            let id = dbg!(res.projects.keys().len());
+            let id = res.projects.keys().len();
             res.projects.entry(record.project.unwrap().clone()).or_insert(id);
             match (&record.estimate, &record.actual) {
                 (Some(estimate), Some(actual)) => {
@@ -90,6 +87,32 @@ impl EBS {
         res.buffer.sort_by(|a, b| a.partial_cmp(b).unwrap());
         Ok(res)
     }
+
+    pub fn montecarlo(&mut self, count: Option<usize>, mut rng: &mut ThreadRng) -> Vec<Vec<f32>> {
+        // Montecarlo
+        let count = count.unwrap_or(DEFAULT_COUNT);
+        let step = count / 10;
+        let start = step - 1;
+        (0..count).for_each(|_| {
+            let mut time_remaining = 0.0;
+            self.projects.iter().for_each(|(_, id)| {
+                let task_estimates = self.todos[*id].clone();
+                let t = task_estimates.iter().fold(0.0, |acc, t| {
+                    acc + t / self.velocity.iter().choose(&mut rng).unwrap()
+                });
+                time_remaining += t * self.buffer.iter().choose(&mut rng).unwrap();
+                if let Some(exists) = self.simulation_runs.get_mut(*id) {
+                    exists.push(time_remaining);
+                } else {
+                    self.simulation_runs.push(vec![time_remaining]);
+                }
+            })
+        });
+        self.simulation_runs.iter_mut().map(|times| {
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            times.iter().skip(start).step_by(step).copied().collect()
+        }).collect()
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -97,38 +120,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = std::env::args();
     if let Some(tasks) = args.into_iter().nth(1) {
         let mut ebs = EBS::new_from_file(tasks)?;
-        // Montecarlo
-        let count = DEFAULT_COUNT;
-        let step = count / 10;
-        let start = step - 1;
-        (0..count).for_each(|_| {
-            let mut time_remaining = 0.0;
-            ebs.projects.iter().for_each(|(_, id)| {
-                let task_estimates = ebs.todos[*id].clone();
-                let t = task_estimates.iter().fold(0.0, |acc, t| {
-                    acc + t / ebs.velocity.iter().choose(&mut rng).unwrap()
-                });
-                time_remaining += t * ebs.buffer.iter().choose(&mut rng).unwrap();
-                if let Some(exists) = ebs.simulation_runs.get_mut(*id) {
-                    exists.push(time_remaining);
-                } else {
-                    ebs.simulation_runs.push(vec![time_remaining]);
+        let _f = ebs.montecarlo(None, &mut rng);
+        let results: Vec<DateTime<Utc>> = _f.iter().map(|timeline| {
+            let mut total = 0.0;
+            let mut day = Utc::now();
+            timeline.iter().for_each(|d| {
+                while *d > total {
+                    day = day.checked_add_days(Days::new(1)).unwrap();
+                    total += d
                 }
-            })
-        });
-
-        let _f: HashMap<String, Vec<f32>> = ebs.projects
-            .iter()
-            .map(|(project, id)| {
-                let mut times = ebs.simulation_runs[*id].clone();
-                times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                (
-                    project.clone(),
-                    times.iter().skip(start).step_by(step).copied().collect(),
-                )
-            })
-            .collect();
-        dbg!(_f);
+            });
+            day
+        }).collect();
+        dbg!(results);
         Ok(())
     } else {
         Ok(())
