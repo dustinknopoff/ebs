@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc, Days, TimeZone};
+use indicatif::ProgressBar;
 use rand::{seq::IteratorRandom, rngs::ThreadRng};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
 
-const DEFAULT_COUNT: usize = 1_000;
+const DEFAULT_COUNT: usize = 100_000;
 
 use serde::Deserialize;
 
@@ -76,8 +77,10 @@ impl EBS {
 
     pub fn montecarlo(&mut self, count: Option<usize>, mut rng: &mut ThreadRng) -> Vec<Vec<f32>> {
         let count = count.unwrap_or(DEFAULT_COUNT);
+        let pb = ProgressBar::new((count * self.projects.len()) as u64);
         let step = count / 10;
         let start = step - 1;
+        pb.tick();
         (0..count).for_each(|_| {
             self.projects.iter().fold(0.0, |acc, (_, id)| {
                 let task_estimates = self.todos[*id].clone();
@@ -92,7 +95,9 @@ impl EBS {
                 }
                 time_remaining
             });
+            pb.inc(1);
         });
+        pb.finish_with_message("Done");
         self.simulation_runs.iter_mut().map(|times| {
             times.sort_by(|a, b| a.partial_cmp(b).unwrap());
             times.iter().skip(start).step_by(step).copied().collect()
@@ -106,6 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(tasks) = args.into_iter().nth(1) {
         let mut ebs = EBS::new_from_file(tasks)?;
         let _f = ebs.montecarlo(None, &mut rng);
+        // Converts the results of the montecarlo simulation into a specific date.
         let results: Vec<DateTime<Utc>> = _f.iter().map(|timeline| {
             let mut total = 0.0;
             let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();

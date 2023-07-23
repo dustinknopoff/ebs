@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 chrono = { version = "0.4.26", features = ["clock"] }
 csv = "1.2.2"
+indicatif = "0.17.5"
 rand = "0.8.5"
 rrule = { version = "0.11.0", features = ["serde"] }
 serde = { version = "1.0.174", features = ["derive"] }
