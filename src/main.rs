@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc, Days};
+use chrono::{DateTime, Utc, Days, TimeZone};
 use rand::{seq::IteratorRandom, rngs::ThreadRng};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip, ops::{Deref, DerefMut}};
 
@@ -73,7 +73,7 @@ impl EBS {
                     res.buffer.push(actual / estimate);
                 }
                 (Some(estimate), None) => {
-                   if let Some(exists) = res.todos.get_mut(id - 1) {
+                   if let Some(exists) = res.todos.get_mut(id) {
                     exists.push(*estimate)
                    } else {
                     res.todos.push(vec![*estimate]);
@@ -123,11 +123,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _f = ebs.montecarlo(None, &mut rng);
         let results: Vec<DateTime<Utc>> = _f.iter().map(|timeline| {
             let mut total = 0.0;
-            let mut day = Utc::now();
-            timeline.iter().for_each(|d| {
-                while *d > total {
+            let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();
+            timeline.iter().for_each(|hours| {
+                while *hours > total {
                     let num_days_to_add = {
-                        let intermediate = (d / 8.0).floor();
+                        let intermediate = (hours / 8.0).floor();
                         if intermediate >= 1.0 {
                             intermediate as u64
                         } else {
@@ -135,7 +135,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
                     day = day.checked_add_days(Days::new(num_days_to_add)).unwrap();
-                    total += d
+                    total += hours
                 }
             });
             day
