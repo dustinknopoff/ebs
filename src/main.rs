@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc, Days, TimeZone};
 use rand::{seq::IteratorRandom, rngs::ThreadRng};
-use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip, ops::{Deref, DerefMut}};
+use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
 
 const DEFAULT_COUNT: usize = 1_000;
 
@@ -20,22 +20,6 @@ struct Task {
 impl Task {
     pub fn has_enough_data(&self) -> bool {
         self.project.is_some() && self.estimate.is_some()
-    }
-}
-
-pub struct ProjectId(usize);
-
-impl Deref for ProjectId {
-    type Target = usize;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ProjectId {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -91,24 +75,23 @@ impl EBS {
     }
 
     pub fn montecarlo(&mut self, count: Option<usize>, mut rng: &mut ThreadRng) -> Vec<Vec<f32>> {
-        // Montecarlo
         let count = count.unwrap_or(DEFAULT_COUNT);
         let step = count / 10;
         let start = step - 1;
         (0..count).for_each(|_| {
-            let mut time_remaining = 0.0;
-            self.projects.iter().for_each(|(_, id)| {
+            self.projects.iter().fold(0.0, |acc, (_, id)| {
                 let task_estimates = self.todos[*id].clone();
                 let t = task_estimates.iter().fold(0.0, |acc, t| {
                     acc + t / self.velocity.iter().choose(&mut rng).unwrap()
                 });
-                time_remaining += t * self.buffer.iter().choose(&mut rng).unwrap();
+                let time_remaining = acc + t * self.buffer.iter().choose(&mut rng).unwrap();
                 if let Some(exists) = self.simulation_runs.get_mut(*id) {
                     exists.push(time_remaining);
                 } else {
                     self.simulation_runs.push(vec![time_remaining]);
                 }
-            })
+                time_remaining
+            });
         });
         self.simulation_runs.iter_mut().map(|times| {
             times.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -140,6 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     total += hours
                 }
             });
+            dbg!(total);
             day
         }).collect();
         dbg!(results);
