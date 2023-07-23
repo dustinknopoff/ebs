@@ -126,7 +126,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut day = Utc::now();
             timeline.iter().for_each(|d| {
                 while *d > total {
-                    day = day.checked_add_days(Days::new(1)).unwrap();
+                    let num_days_to_add = {
+                        let intermediate = (d / 8.0).floor();
+                        if intermediate >= 1.0 {
+                            intermediate as u64
+                        } else {
+                            1.0 as u64
+                        }
+                    };
+                    day = day.checked_add_days(Days::new(num_days_to_add)).unwrap();
                     total += d
                 }
             });
