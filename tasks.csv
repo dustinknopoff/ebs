@@ -1,0 +1,19 @@
+project,task,assignee,estimate,actual
+,,,,
+issue 35,data query,,2,4.1
+issue 35,view/template,,2,2.9
+issue 35,plots,,1,2.4
+issue 35,js,,1,0.2
+issue 35,css,,1,3.6
+issue 35,cms integration,,4,
+issue 35,deploy,,2,
+issue 35,bug fixes,,,0.8
+,,,,
+issue 27,spec formulas,,0.5,3.6
+issue 27,data query,,3,0.3
+issue 27,template,,2,4.9
+issue 27,js,,4,7.1
+issue 27,form,,,1.1
+issue 27,css,,2,
+issue 27,adapt offline classes,,8,
+issue 27,plots,,3.3,
