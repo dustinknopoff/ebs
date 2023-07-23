@@ -9,7 +9,9 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 struct Task {
     project: Option<String>,
+    #[allow(unused)]
     task: Option<String>,
+    #[allow(unused)]
     assignee: Option<String>,
     estimate: Option<f32>,
     actual: Option<f32>,
