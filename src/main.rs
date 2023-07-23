@@ -3,7 +3,7 @@ use indicatif::ProgressBar;
 use rand::{seq::IteratorRandom, rngs::ThreadRng};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
 
-const DEFAULT_COUNT: usize = 100_000;
+const DEFAULT_COUNT: usize = 1_000;
 
 use serde::Deserialize;
 
@@ -97,7 +97,8 @@ impl EBS {
             });
             pb.inc(1);
         });
-        pb.finish_with_message("Done");
+        pb.finish_and_clear();
+        println!("Simulations ran for {} projects in {:?}.", self.projects.len(), pb.elapsed());
         self.simulation_runs.iter_mut().map(|times| {
             times.sort_by(|a, b| a.partial_cmp(b).unwrap());
             times.iter().skip(start).step_by(step).copied().collect()
