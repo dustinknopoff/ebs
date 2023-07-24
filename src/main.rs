@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc, Days, TimeZone};
+use chrono::{DateTime, Datelike, Days, TimeZone, Timelike, Utc, Weekday};
 use indicatif::ProgressBar;
-use rand::{seq::IteratorRandom, rngs::ThreadRng};
+use rand::{rngs::ThreadRng, seq::IteratorRandom};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
 
 const DEFAULT_COUNT: usize = 1_000;
@@ -27,7 +27,7 @@ impl Task {
 #[derive(Debug, Default, Clone)]
 pub struct EBS {
     /// Mapping of a project name to it's unique ID.
-    /// Fields where this ID is not 
+    /// Fields where this ID is not
     projects: HashMap<String, usize>,
     /// Buffer time in a project
     buffer: Vec<f32>,
@@ -51,8 +51,6 @@ impl EBS {
             if !record.has_enough_data() {
                 continue;
             }
-            let id = res.projects.keys().len();
-            res.projects.entry(record.project.unwrap().clone()).or_insert(id);
             match (&record.estimate, &record.actual) {
                 (Some(estimate), Some(actual)) => {
                     estimates.push(*estimate);
@@ -60,11 +58,16 @@ impl EBS {
                     res.buffer.push(actual / estimate);
                 }
                 (Some(estimate), None) => {
-                   if let Some(exists) = res.todos.get_mut(id) {
-                    exists.push(*estimate)
-                   } else {
-                    res.todos.push(vec![*estimate]);
-                   }
+                    let id = {
+                        let id = res.projects.keys().len();
+                        let project = record.project.unwrap().clone();
+                        *res.projects.entry(project.clone()).or_insert(id)
+                    };
+                    if let Some(exists) = res.todos.get_mut(id) {
+                        exists.push(*estimate)
+                    } else {
+                        res.todos.push(vec![*estimate]);
+                    }
                 }
                 _ => {}
             }
@@ -98,11 +101,18 @@ impl EBS {
             pb.inc(1);
         });
         pb.finish_and_clear();
-        println!("Simulations ran for {} projects in {:?}.", self.projects.len(), pb.elapsed());
-        self.simulation_runs.iter_mut().map(|times| {
-            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            times.iter().skip(start).step_by(step).copied().collect()
-        }).collect()
+        println!(
+            "Simulations ran for {} projects in {:?}.",
+            self.projects.len(),
+            pb.elapsed()
+        );
+        self.simulation_runs
+            .iter_mut()
+            .map(|times| {
+                times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                times.iter().skip(start).step_by(step).copied().collect()
+            })
+            .collect()
     }
 }
 
@@ -113,29 +123,34 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut ebs = EBS::new_from_file(tasks)?;
         let _f = ebs.montecarlo(None, &mut rng);
         // Converts the results of the montecarlo simulation into a specific date.
-        let results: Vec<DateTime<Utc>> = _f.iter().map(|timeline| {
-            let mut total = 0.0;
-            let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();
-            timeline.iter().for_each(|hours| {
-                while *hours > total {
-                    let num_days_to_add = {
-                        let intermediate = (hours / 8.0).floor();
-                        if intermediate >= 1.0 {
-                            intermediate as u64
-                        } else {
-                            1.0 as u64
+        let mut total = 0.0;
+        let results: Vec<Vec<DateTime<Utc>>> = _f
+        .iter()
+        .map(|timeline| {
+                let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();
+                timeline.iter().map(|hours| {
+                    while *hours > total {
+                        day = day.with_hour(0).unwrap();
+                        day = day.checked_add_days(Days::new(1)).unwrap();
+                        match day.weekday() {
+                            Weekday::Mon
+                            | Weekday::Tue
+                            | Weekday::Wed
+                            | Weekday::Thu
+                            | Weekday::Fri => {
+                                total += 8.0;
+                            }
+                            _ => {
+                                total += 0.0;
+                            }
                         }
-                    };
-                    day = day.checked_add_days(Days::new(num_days_to_add)).unwrap();
-                    total += hours
-                }
-            });
-            dbg!(total);
-            day
-        }).collect();
+                    }
+                    day
+                }).collect()
+            })
+            .collect();
+        dbg!(total);
         dbg!(results);
-        Ok(())
-    } else {
-        Ok(())
     }
+    Ok(())
 }
