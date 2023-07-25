@@ -20,7 +20,7 @@ struct Task {
 
 impl Task {
     pub fn has_enough_data(&self) -> bool {
-        self.project.is_some() && self.estimate.is_some()
+        self.project.is_some()
     }
 }
 
@@ -46,32 +46,56 @@ impl EBS {
         let mut rdr = csv::Reader::from_reader(buf_reader);
         let mut estimates: Vec<f32> = Vec::new();
         let mut actuals: Vec<f32> = Vec::new();
+        let mut only_with_estimates_actuals: Vec<f32> = vec![];
+        let mut all_actuals: Vec<f32> = vec![];
         for result in rdr.deserialize() {
             let record: Task = result?;
             if !record.has_enough_data() {
                 continue;
             }
+            let id = {
+                let id = res.projects.keys().len();
+                let project = record.project.unwrap().clone();
+                *res.projects.entry(project.clone()).or_insert(id)
+            };
             match (&record.estimate, &record.actual) {
                 (Some(estimate), Some(actual)) => {
                     estimates.push(*estimate);
                     actuals.push(*actual);
-                    res.buffer.push(actual / estimate);
+                    if let Some(exists) = all_actuals.get_mut(id) {
+                        *exists += actual;
+                    } else {
+                        all_actuals.push(*actual);
+                    }
+                    if let Some(exists) = only_with_estimates_actuals.get_mut(id) {
+                        *exists += actual;
+                    } else {
+                        only_with_estimates_actuals.push(*actual);
+                    }
                 }
                 (Some(estimate), None) => {
-                    let id = {
-                        let id = res.projects.keys().len();
-                        let project = record.project.unwrap().clone();
-                        *res.projects.entry(project.clone()).or_insert(id)
-                    };
                     if let Some(exists) = res.todos.get_mut(id) {
                         exists.push(*estimate)
                     } else {
                         res.todos.push(vec![*estimate]);
                     }
                 }
+                (None, Some(actual)) => {
+                    if let Some(exists) = all_actuals.get_mut(id) {
+                        *exists += actual;
+                    } else {
+                        all_actuals.push(*actual);
+                    }
+                }
                 _ => {}
             }
         }
+        res.buffer = res
+            .projects.values().map(|id|{
+                dbg!(all_actuals[*id], only_with_estimates_actuals[*id]);
+                 all_actuals[*id] / only_with_estimates_actuals[*id]
+            })
+            .collect();
         res.velocity = zip(estimates, actuals).map(|(e, a)| e / a).collect();
         res.velocity.sort_by(|a, b| a.partial_cmp(b).unwrap());
         res.buffer.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -84,13 +108,14 @@ impl EBS {
         let step = count / 10;
         let start = step - 1;
         pb.tick();
+        dbg!(&self.buffer);
         (0..count).for_each(|_| {
-            self.projects.iter().fold(0.0, |acc, (_, id)| {
+            self.projects.iter().fold(0.0, |remaining, (_, id)| {
                 let task_estimates = self.todos[*id].clone();
-                let t = task_estimates.iter().fold(0.0, |acc, t| {
-                    acc + t / self.velocity.iter().choose(&mut rng).unwrap()
+                let t = task_estimates.iter().fold(0.0, |estimate, t| {
+                    t / self.velocity.iter().choose(&mut rng).unwrap() + estimate
                 });
-                let time_remaining = acc + t * self.buffer.iter().choose(&mut rng).unwrap();
+                let time_remaining = t * self.buffer.iter().choose(&mut rng).unwrap() + remaining;
                 if let Some(exists) = self.simulation_runs.get_mut(*id) {
                     exists.push(time_remaining);
                 } else {
@@ -124,29 +149,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _f = ebs.montecarlo(None, &mut rng);
         // Converts the results of the montecarlo simulation into a specific date.
         let mut total = 0.0;
+        dbg!(&_f);
         let results: Vec<Vec<DateTime<Utc>>> = _f
-        .iter()
-        .map(|timeline| {
+            .iter()
+            .map(|timeline| {
                 let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();
-                timeline.iter().map(|hours| {
-                    while *hours > total {
-                        day = day.with_hour(0).unwrap();
-                        day = day.checked_add_days(Days::new(1)).unwrap();
-                        match day.weekday() {
-                            Weekday::Mon
-                            | Weekday::Tue
-                            | Weekday::Wed
-                            | Weekday::Thu
-                            | Weekday::Fri => {
-                                total += 8.0;
-                            }
-                            _ => {
-                                total += 0.0;
+                timeline
+                    .iter()
+                    .map(|hours| {
+                        while *hours > total {
+                            day = day.with_hour(0).unwrap();
+                            day = day.checked_add_days(Days::new(1)).unwrap();
+                            match day.weekday() {
+                                Weekday::Mon
+                                | Weekday::Tue
+                                | Weekday::Wed
+                                | Weekday::Thu
+                                | Weekday::Fri => {
+                                    total += 8.0;
+                                }
+                                _ => {
+                                    total += 0.0;
+                                }
                             }
                         }
-                    }
-                    day
-                }).collect()
+                        day
+                    })
+                    .collect()
             })
             .collect();
         dbg!(total);
