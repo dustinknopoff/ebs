@@ -53,6 +53,9 @@ impl EBS {
             if !record.has_enough_data() {
                 continue;
             }
+            // We guarantee above that the project key is defined in the row.
+            // We then use it in objects in Self as an id to the index
+            // (Struct of Arrays instead of Array of Structs)
             let id = {
                 let id = res.projects.keys().len();
                 let project = record.project.unwrap().clone();
@@ -92,10 +95,12 @@ impl EBS {
         }
         res.buffer = res
             .projects.values().map(|id|{
-                dbg!(all_actuals[*id], only_with_estimates_actuals[*id]);
+                // The buffer is the sum of all actual values divided by the sum of those which
+                // Also have an estimate
                  all_actuals[*id] / only_with_estimates_actuals[*id]
             })
             .collect();
+        // Velocities are the estimate : actual ratio
         res.velocity = zip(estimates, actuals).map(|(e, a)| e / a).collect();
         res.velocity.sort_by(|a, b| a.partial_cmp(b).unwrap());
         res.buffer.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -108,13 +113,16 @@ impl EBS {
         let step = count / 10;
         let start = step - 1;
         pb.tick();
-        dbg!(&self.buffer);
+        // We run {count} simulations
         (0..count).for_each(|_| {
             self.projects.iter().fold(0.0, |remaining, (_, id)| {
+                // The "montecarlo" here is randomly specifying that the 
+                // Task will take a previous velocity length
                 let task_estimates = self.todos[*id].clone();
                 let t = task_estimates.iter().fold(0.0, |estimate, t| {
                     t / self.velocity.iter().choose(&mut rng).unwrap() + estimate
                 });
+                // And then that we will have a random buffer left after finishing the task
                 let time_remaining = t * self.buffer.iter().choose(&mut rng).unwrap() + remaining;
                 if let Some(exists) = self.simulation_runs.get_mut(*id) {
                     exists.push(time_remaining);
@@ -131,6 +139,7 @@ impl EBS {
             self.projects.len(),
             pb.elapsed()
         );
+        // We then trim down the simulation runs to 1/10th sampling
         self.simulation_runs
             .iter_mut()
             .map(|times| {
@@ -149,7 +158,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _f = ebs.montecarlo(None, &mut rng);
         // Converts the results of the montecarlo simulation into a specific date.
         let mut total = 0.0;
-        dbg!(&_f);
         let results: Vec<Vec<DateTime<Utc>>> = _f
             .iter()
             .map(|timeline| {
