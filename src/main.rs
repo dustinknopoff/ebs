@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Days, TimeZone, Timelike, Utc, Weekday};
+use chrono::{Datelike, Days, Timelike, Utc, Weekday, NaiveDate, NaiveDateTime};
 use indicatif::ProgressBar;
 use rand::{rngs::ThreadRng, seq::IteratorRandom};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
@@ -16,12 +16,6 @@ struct Task {
     assignee: Option<String>,
     estimate: Option<f32>,
     actual: Option<f32>,
-}
-
-impl Task {
-    pub fn has_enough_data(&self) -> bool {
-        self.project.is_some()
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -50,7 +44,7 @@ impl EBS {
         let mut all_actuals: Vec<f32> = vec![];
         for result in rdr.deserialize() {
             let record: Task = result?;
-            if !record.has_enough_data() {
+            if record.project.is_none() {
                 continue;
             }
             // We guarantee above that the project key is defined in the row.
@@ -110,7 +104,7 @@ impl EBS {
     pub fn montecarlo(&mut self, count: Option<usize>, mut rng: &mut ThreadRng) -> Vec<Vec<f32>> {
         let count = count.unwrap_or(DEFAULT_COUNT);
         let pb = ProgressBar::new((count * self.projects.len()) as u64);
-        let step = count / 10;
+        let step = count / 100;
         let start = step - 1;
         pb.tick();
         // We run {count} simulations
@@ -156,38 +150,36 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(tasks) = args.into_iter().nth(1) {
         let mut ebs = EBS::new_from_file(tasks)?;
         let _f = ebs.montecarlo(None, &mut rng);
-        // Converts the results of the montecarlo simulation into a specific date.
-        let mut total = 0.0;
-        let results: Vec<Vec<DateTime<Utc>>> = _f
-            .iter()
-            .map(|timeline| {
-                let mut day = Utc.with_ymd_and_hms(2015, 9, 4, 0, 0, 0).unwrap();
-                timeline
-                    .iter()
-                    .map(|hours| {
-                        while *hours > total {
-                            day = day.with_hour(0).unwrap();
-                            day = day.checked_add_days(Days::new(1)).unwrap();
-                            match day.weekday() {
-                                Weekday::Mon
-                                | Weekday::Tue
-                                | Weekday::Wed
-                                | Weekday::Thu
-                                | Weekday::Fri => {
-                                    total += 8.0;
-                                }
-                                _ => {
-                                    total += 0.0;
-                                }
-                            }
-                        }
-                        day
-                    })
-                    .collect()
-            })
-            .collect();
-        dbg!(total);
-        dbg!(results);
+        ebs.projects.iter().for_each(|(project, id)| {
+            let chance50 = (_f[*id][49] / 8.0).ceil();
+            let chance95 = (_f[*id][94] / 8.0).ceil();
+            println!("{project}:");
+            println!("\t50% chance: {}, {} dev days", dev_days_as_days(chance50 as usize, Utc::now().naive_local()), chance50);
+            println!("\t95% chance: {}, {} dev days", dev_days_as_days(chance95 as usize, Utc::now().naive_local()), chance95);
+        })
     }
     Ok(())
+}
+
+fn dev_days_as_days(number: usize, startdate: NaiveDateTime) -> NaiveDate {
+        (0..=number).fold(startdate, |acc, _| {
+            let mut day = acc.with_hour(0).unwrap();
+            day = day.checked_add_days(Days::new(1)).unwrap();
+            match day.weekday() {
+                Weekday::Mon
+                | Weekday::Tue
+                | Weekday::Wed
+                | Weekday::Thu
+                | Weekday::Fri => {
+                    day
+                }
+                Weekday::Sat => {
+                    day.checked_add_days(Days::new(2)).unwrap()
+                },
+                Weekday::Sun => {
+                    day.checked_add_days(Days::new(1)).unwrap()
+                }
+            }
+        }).date()
+
 }
