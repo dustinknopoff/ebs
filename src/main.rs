@@ -1,9 +1,9 @@
-use chrono::{Datelike, Days, Timelike, Utc, Weekday, NaiveDate, NaiveDateTime};
 use indicatif::ProgressBar;
+use jiff::{civil::Weekday, ToSpan};
 use rand::{rngs::ThreadRng, seq::IteratorRandom};
 use std::{collections::HashMap, error::Error, fs::File, io::BufReader, iter::zip};
 
-const DEFAULT_COUNT: usize = 1_000;
+const DEFAULT_COUNT: usize = 1_000_000;
 
 use serde::Deserialize;
 
@@ -146,6 +146,7 @@ impl EBS {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut rng = rand::thread_rng();
+    let date = jiff::Zoned::now();
     let args = std::env::args();
     if let Some(tasks) = args.into_iter().nth(1) {
         let mut ebs = EBS::new_from_file(tasks)?;
@@ -154,32 +155,32 @@ fn main() -> Result<(), Box<dyn Error>> {
             let chance50 = (_f[*id][49] / 8.0).ceil();
             let chance95 = (_f[*id][94] / 8.0).ceil();
             println!("{project}:");
-            println!("\t50% chance: {}, {} dev days", dev_days_as_days(chance50 as usize, Utc::now().naive_local()), chance50);
-            println!("\t95% chance: {}, {} dev days", dev_days_as_days(chance95 as usize, Utc::now().naive_local()), chance95);
+            println!("\t50% chance: {}, {} dev days", &dev_days_as_days(chance50 as usize, date.clone()), chance50);
+            println!("\t95% chance: {}, {} dev days", &dev_days_as_days(chance95 as usize, date.clone()), chance95);
         })
     }
     Ok(())
 }
 
-fn dev_days_as_days(number: usize, startdate: NaiveDateTime) -> NaiveDate {
+fn dev_days_as_days(number: usize, startdate: jiff::Zoned) -> jiff::Zoned {
         (0..=number).fold(startdate, |acc, _| {
-            let mut day = acc.with_hour(0).unwrap();
-            day = day.checked_add_days(Days::new(1)).unwrap();
+            let mut day = acc.start_of_day().unwrap();
+            day = day.checked_add(1.day()).unwrap();
             match day.weekday() {
-                Weekday::Mon
-                | Weekday::Tue
-                | Weekday::Wed
-                | Weekday::Thu
-                | Weekday::Fri => {
+                Weekday::Monday
+                | Weekday::Tuesday
+                | Weekday::Wednesday
+                | Weekday::Thursday
+                | Weekday::Friday => {
                     day
                 }
-                Weekday::Sat => {
-                    day.checked_add_days(Days::new(2)).unwrap()
+                Weekday::Saturday => {
+                    day.checked_add(2.days()).unwrap()
                 },
-                Weekday::Sun => {
-                    day.checked_add_days(Days::new(1)).unwrap()
+                Weekday::Sunday => {
+                    day.checked_add(1.days()).unwrap()
                 }
             }
-        }).date()
+        })
 
 }
