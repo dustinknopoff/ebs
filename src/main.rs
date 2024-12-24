@@ -37,16 +37,25 @@ impl EBS {
         let mut res = Self::default();
         let file = File::open(path)?;
         let buf_reader = BufReader::new(file);
-        let mut rdr = csv::Reader::from_reader(buf_reader);
+        let rdr = csv::Reader::from_reader(buf_reader);
         let mut estimates: Vec<f32> = Vec::new();
         let mut actuals: Vec<f32> = Vec::new();
-        let mut only_with_estimates_actuals: Vec<f32> = vec![];
-        let mut all_actuals: Vec<f32> = vec![];
-        for result in rdr.deserialize() {
+        let mut tasks = Vec::new();
+        let mut project_count = 0;
+        for result in rdr.into_deserialize() {
             let record: Task = result?;
-            if record.project.is_none() {
-                continue;
+            if let Some(project) = &record.project {
+                if !res.projects.contains_key(project) {
+                    res.projects.insert(project.clone(), project_count);
+                    project_count += 1;
+                }
+                tasks.push(record);
             }
+        }
+
+        let mut only_with_estimates_actuals: Vec<f32> = vec![0.0; project_count];
+        let mut all_actuals: Vec<f32> = vec![0.0; project_count];
+        for record in tasks {
             // We guarantee above that the project key is defined in the row.
             // We then use it in objects in Self as an id to the index
             // (Struct of Arrays instead of Array of Structs)
@@ -88,10 +97,16 @@ impl EBS {
             }
         }
         res.buffer = res
-            .projects.values().map(|id|{
-                // The buffer is the sum of all actual values divided by the sum of those which
-                // Also have an estimate
-                 all_actuals[*id] / only_with_estimates_actuals[*id]
+            .projects
+            .values()
+            .filter_map(|id| {
+                if only_with_estimates_actuals[*id] == 0.0 {
+                    None
+                } else {
+                    // The buffer is the sum of all actual values divided by the sum of those which
+                    // Also have an estimate
+                    Some(all_actuals[*id] / only_with_estimates_actuals[*id])
+                }
             })
             .collect();
         // Velocities are the estimate : actual ratio
@@ -110,7 +125,7 @@ impl EBS {
         // We run {count} simulations
         (0..count).for_each(|_| {
             self.projects.iter().fold(0.0, |remaining, (_, id)| {
-                // The "montecarlo" here is randomly specifying that the 
+                // The "montecarlo" here is randomly specifying that the
                 // Task will take a previous velocity length
                 let task_estimates = self.todos[*id].clone();
                 let t = task_estimates.iter().fold(0.0, |estimate, t| {
@@ -154,33 +169,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         ebs.projects.iter().for_each(|(project, id)| {
             let chance50 = (_f[*id][49] / 8.0).ceil();
             let chance95 = (_f[*id][94] / 8.0).ceil();
-            println!("{project}:");
-            println!("\t50% chance: {}, {} dev days", &dev_days_as_days(chance50 as usize, date.clone()), chance50);
-            println!("\t95% chance: {}, {} dev days", &dev_days_as_days(chance95 as usize, date.clone()), chance95);
+            if chance50 > 0.0 {
+                println!("{project}:");
+                println!(
+                    "\t50% chance: {}, {} dev days",
+                    &dev_days_as_days(chance50 as usize, date.clone()),
+                    chance50
+                );
+                println!(
+                    "\t95% chance: {}, {} dev days",
+                    &dev_days_as_days(chance95 as usize, date.clone()),
+                    chance95
+                );
+            }
         })
     }
     Ok(())
 }
 
 fn dev_days_as_days(number: usize, startdate: jiff::Zoned) -> jiff::Zoned {
-        (0..=number).fold(startdate, |acc, _| {
-            let mut day = acc.start_of_day().unwrap();
-            day = day.checked_add(1.day()).unwrap();
-            match day.weekday() {
-                Weekday::Monday
-                | Weekday::Tuesday
-                | Weekday::Wednesday
-                | Weekday::Thursday
-                | Weekday::Friday => {
-                    day
-                }
-                Weekday::Saturday => {
-                    day.checked_add(2.days()).unwrap()
-                },
-                Weekday::Sunday => {
-                    day.checked_add(1.days()).unwrap()
-                }
-            }
-        })
-
+    (0..=number).fold(startdate, |acc, _| {
+        let mut day = acc.start_of_day().unwrap();
+        day = day.checked_add(1.day()).unwrap();
+        match day.weekday() {
+            Weekday::Monday
+            | Weekday::Tuesday
+            | Weekday::Wednesday
+            | Weekday::Thursday
+            | Weekday::Friday => day,
+            Weekday::Saturday => day.checked_add(2.days()).unwrap(),
+            Weekday::Sunday => day.checked_add(1.days()).unwrap(),
+        }
+    })
 }
